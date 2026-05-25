@@ -1,0 +1,5 @@
+cd desktop
+
+cd DIS and PTP
+
+python dis_sa_server.py

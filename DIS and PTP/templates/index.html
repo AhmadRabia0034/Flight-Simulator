@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>DIS Situational Awareness</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <style>
+    html, body { height: 100%; margin: 0; font-family: Arial, sans-serif; }
+    #container { display: flex; height: 100%; }
+    #map { flex: 1; }
+    #sidebar { width: 340px; background: #111827; color: white; padding: 14px; overflow-y: auto; box-sizing: border-box; }
+    .panel { margin-bottom: 16px; padding: 12px; background: #1f2937; border-radius: 10px; }
+    .panel h3 { margin: 0 0 10px 0; font-size: 16px; }
+    .node-item { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.08); font-size: 14px; }
+    .status-connected { color: #22c55e; font-weight: bold; }
+    .status-disconnected { color: #ef4444; font-weight: bold; }
+    .label { font-size: 12px; font-weight: bold; color: #111; background: rgba(255,255,255,0.85); padding: 2px 4px; border-radius: 3px; border: 1px solid #777; }
+    .legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+    #events { font-size: 13px; line-height: 1.4; max-height: 180px; overflow-y: auto; }
+    .event-ok { color: #22c55e; }
+    .event-drop { color: #ef4444; }
+    .ptp-box { display: block; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.08); font-size: 13px; line-height: 1.4; }
+  </style>
+</head>
+<body>
+<div id="container">
+  <div id="map"></div>
+  <div id="sidebar">
+    <div class="panel">
+      <h3>Situational Awareness</h3>
+      <div><span class="legend-dot" style="background: gold;"></span>Marka flight node (Live)</div>
+      <div><span class="legend-dot" style="background: red;"></span>Marka flight node (Offline)</div>
+      <div><span class="legend-dot" style="background: deepskyblue;"></span>Global regional nodes</div>
+    </div>
+    <div class="panel"><h3>Connected</h3><div id="connectedList"></div></div>
+    <div class="panel"><h3>Disconnected</h3><div id="disconnectedList"></div></div>
+    <div class="panel"><h3>PTP / Timing</h3><div id="ptpList"></div></div>
+    <div class="panel"><h3>Recent Events</h3><div id="events"></div></div>
+  </div>
+</div>
+<script>
+  const map = L.map('map').setView([31.9727, 35.9916], 3);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '&copy; OpenStreetMap contributors' }).addTo(map);
+  L.marker([31.9727, 35.9916]).addTo(map).bindPopup("<b>Marka International Airport (OJAM)</b>");
+  const markers = {};
+  const nodeStatuses = {};
+  const ptpData = {};
+  const eventsDiv = document.getElementById("events");
+
+  function colorForCluster(cluster) {
+    const colors = {
+      jordan:'gold', iraq:'limegreen', egypt:'deepskyblue', ksa:'orange',
+      uae:'violet', turkey:'tomato', germany:'lightgray', uk:'tan',
+      usa:'plum', india:'lightcoral', japan:'cyan', australia:'lightseagreen', brazil:'lightpink'
+    };
+    return colors[cluster] || 'blue';
+  }
+  function radiusForEntity(ent) { return ent.virtual ? 12 : 8; }
+  function addEvent(text, cls) {
+    const p = document.createElement("div"); p.className = cls; p.textContent = text; eventsDiv.prepend(p);
+    while (eventsDiv.children.length > 20) eventsDiv.removeChild(eventsDiv.lastChild);
+  }
+  function renderStatusLists() {
+    const connected = document.getElementById("connectedList");
+    const disconnected = document.getElementById("disconnectedList");
+    connected.innerHTML = ""; disconnected.innerHTML = "";
+    for (const name of Object.keys(nodeStatuses).sort()) {
+      const status = nodeStatuses[name];
+      const row = document.createElement("div");
+      row.className = "node-item";
+      row.innerHTML = `<span>${name}</span><span class="status-${status}">${status}</span>`;
+      if (status === "connected") connected.appendChild(row); else disconnected.appendChild(row);
+    }
+  }
+  function renderPtpList() {
+    const ptpList = document.getElementById("ptpList"); ptpList.innerHTML = "";
+    for (const name of Object.keys(ptpData).sort()) {
+      const d = ptpData[name];
+      const row = document.createElement("div");
+      row.className = "ptp-box";
+      row.innerHTML = `<div><b>${name}</b></div>
+        <div>Offset: ${Number(d.clock_offset_ms || 0).toFixed(2)} ms</div>
+        <div>Sync error: ${Number(d.ptp_sync_error_ms || 0).toFixed(2)} ms</div>
+        <div>Latency: ${Number(d.one_way_latency_ms || 0).toFixed(2)} ms</div>`;
+      ptpList.appendChild(row);
+    }
+  }
+  
+  const socket = io();
+  
+  socket.on('entity_update', function(ent) {
+    let color = colorForCluster(ent.cluster);
+    let statusText = "🟢 Live (FlightGear Running)";
+    
+    // Check if FlightGear is closed/parked based on our DIS Marking
+    if (ent.marking === "C172_PARKED" || ent.marking === "C172_PARKE") {
+        color = "#ef4444"; // Red Color
+        statusText = "🔴 Offline / Parked (FlightGear Closed)";
+    }
+
+    const popupText = `<b>${ent.name}</b><br>
+                       Status: ${statusText}<br>
+                       Cluster: ${ent.cluster}<br>
+                       Latency: ${ent.latency_ms.toFixed(1)} ms<br>
+                       Offset: ${Number(ent.clock_offset_ms || 0).toFixed(2)} ms<br>
+                       Sync error: ${Number(ent.ptp_sync_error_ms || 0).toFixed(2)} ms<br>
+                       Alt: ${ent.alt.toFixed(1)} m<br>
+                       Roll: ${ent.roll.toFixed(3)}<br>
+                       Pitch: ${ent.pitch.toFixed(3)}`;
+
+    if (!markers[ent.name]) {
+      markers[ent.name] = L.circleMarker([ent.lat, ent.lon], { radius: radiusForEntity(ent), color:"black", weight:1, fillColor:color, fillOpacity:0.9 }).addTo(map);
+      markers[ent.name].bindPopup(popupText);
+      markers[ent.name].bindTooltip(ent.name, { permanent:true, direction:'right', className:'label', offset:[8,0] });
+    } else {
+      markers[ent.name].setLatLng([ent.lat, ent.lon]);
+      markers[ent.name].setStyle({ fillColor: color });
+      markers[ent.name].setPopupContent(popupText);
+    }
+    
+    ptpData[ent.name] = { ...(ptpData[ent.name] || {}), node:ent.name, clock_offset_ms:ent.clock_offset_ms || 0, ptp_sync_error_ms:ent.ptp_sync_error_ms || 0, one_way_latency_ms:ent.latency_ms || 0 };
+    renderPtpList();
+  });
+  
+  socket.on('node_status', function(info) { nodeStatuses[info.name] = info.status; renderStatusLists(); });
+  socket.on('packet_event', function(evt) { if (evt.status === "ok") addEvent(`${evt.src} connected / packet received`, "event-ok"); else addEvent(`${evt.src} packet dropped`, "event-drop"); });
+  socket.on('ptp_update', function(info) { ptpData[info.node] = info; renderPtpList(); });
+</script>
+</body>
+</html>

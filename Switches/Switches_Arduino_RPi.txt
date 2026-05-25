@@ -1,0 +1,43 @@
+const int pinAlternator = 2; 
+const int pinBattery = 3;
+const int pinPrimer = 4;
+const int pinMagnetos = 5;
+const int pinAvionics = 6; 
+const int ledPin = 7; 
+
+void setup() 
+{
+  Serial.begin(115200);
+  
+  pinMode(pinAlternator, INPUT);
+  pinMode(pinBattery, INPUT);
+  pinMode(pinPrimer, INPUT);
+  pinMode(pinMagnetos, INPUT);
+  pinMode(pinAvionics, INPUT);
+
+  pinMode(ledPin, OUTPUT);
+  digitalWrite(ledPin, LOW);
+}
+
+void loop() {
+  int alt = digitalRead(pinAlternator);
+  int bat = digitalRead(pinBattery);
+  int pri = digitalRead(pinPrimer);
+  int mag = digitalRead(pinMagnetos);
+  int av  = digitalRead(pinAvionics);
+
+  Serial.print(alt); Serial.print(",");
+  Serial.print(bat); Serial.print(",");
+  Serial.print(pri); Serial.print(",");
+  Serial.print(mag); Serial.print(",");
+  Serial.println(av);
+
+  if (Serial.available() > 0) 
+  {
+    char cmd = Serial.read();
+    if (cmd == 'L') digitalWrite(ledPin, HIGH);
+    else if (cmd == 'D') digitalWrite(ledPin, LOW);
+  }
+
+  delay(50); 
+}

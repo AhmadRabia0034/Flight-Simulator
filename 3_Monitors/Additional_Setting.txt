@@ -1,0 +1,1 @@
+--config=C:\Users\20210034\AppData\Roaming\flightgear.org\FlightGear\3monitors_Edit.xml

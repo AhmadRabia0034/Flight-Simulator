@@ -1,0 +1,61 @@
+import pygame
+import socket
+import time
+
+FG_IP = "192.168.137.1" 
+FG_PORT = 5005 
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+pygame.init()
+pygame.joystick.init()
+
+if pygame.joystick.get_count() == 0:
+    print("Connect YokeSystem.")
+    exit()
+
+yoke = pygame.joystick.Joystick(0)
+yoke.init()
+print(f"successfully: {yoke.get_name()}")
+
+trim_up = 0.0
+parking_brake_state = 0
+last_pb_button_state = 0
+
+try:
+    print("Done")
+    while True:
+        pygame.event.pump() 
+
+        aileron = yoke.get_axis(0)
+        elevator = yoke.get_axis(1) * -1.0  
+        throttle = (yoke.get_axis(2) * -1.0 + 1.0) / 2.0 
+        
+        try:
+            mixture = (yoke.get_axis(4) * -1.0 + 1.0) / 2.0
+        except:
+            mixture = (yoke.get_axis(3) * -1.0 + 1.0) / 2.0 
+
+        brakes = yoke.get_button(0) 
+        
+        current_pb_button_state = yoke.get_button(1)
+        if current_pb_button_state == 1 and last_pb_button_state == 0:
+            if parking_brake_state == 0:
+                parking_brake_state = 1 
+            else:
+                parking_brake_state = 0
+        last_pb_button_state = current_pb_button_state 
+        
+        if yoke.get_button(2): 
+            trim_up += 0.01 
+            if trim_up > 1.0: trim_up = 1.0
+
+        payload = f"{aileron:.3f},{elevator:.3f},{throttle:.3f},{mixture:.3f},{brakes},{parking_brake_state},{trim_up:.3f}\n"
+        
+        sock.sendto(payload.encode('utf-8'), (FG_IP, FG_PORT))
+        
+        time.sleep(0.03) 
+
+except KeyboardInterrupt:
+    print("\nDisconnected")
+    pygame.quit()

@@ -1,0 +1,1 @@
+--generic=socket,out,20,127.0.0.1,49000,udp,FG_To_DIS

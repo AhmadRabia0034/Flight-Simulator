@@ -1,0 +1,152 @@
+#include <Servo.h>
+#include <Wire.h>
+
+Servo servos[6];
+int pins[] = {3, 4, 5, 6, 7, 8};
+
+const byte numChars = 32;
+char receivedChars[numChars];
+boolean newData = false;
+
+const int MPU = 0x68;
+int16_t AcX, AcY, AcZ;
+float roll_offset = 2.2;  
+float pitch_offset = 1.0; 
+unsigned long lastIMURead = 0;
+const int IMU_INTERVAL = 50; 
+
+void setup() 
+{
+  Serial.begin(115200);
+  
+  for(int i = 0; i < 6; i++) 
+  {
+    servos[i].attach(pins[i]);
+    servos[i].write(90); 
+  }
+
+  Wire.begin();
+  Wire.beginTransmission(MPU);
+  Wire.write(0x6B);  
+  Wire.write(0x00);  
+  Wire.endTransmission();
+
+}
+
+void loop() 
+{
+  recvWithStartEndMarkers();
+  parseAndMove();
+  readAndSendIMU(); 
+}
+
+void recvWithStartEndMarkers() 
+{
+  static boolean recvInProgress = false;
+  static byte ndx = 0;
+  char startMarker = '<';
+  char endMarker = '>';
+  char rc;
+
+  while (Serial.available() > 0 && newData == false) 
+  {
+    rc = Serial.read();
+    if (recvInProgress == true) 
+    {
+      if (rc != endMarker) 
+      {
+        receivedChars[ndx] = rc;
+        ndx++;
+        if (ndx >= numChars) 
+        { 
+             ndx = numChars - 1; 
+        }
+      } else 
+        {
+          receivedChars[ndx] = '\0'; 
+          recvInProgress = false;
+          ndx = 0;
+          newData = true;
+        }
+    } else if (rc == startMarker) 
+      {
+         recvInProgress = true;
+      }
+  }
+}
+
+void parseAndMove() 
+{
+  if (newData == true) 
+  {
+    char * strtokIndx; 
+    strtokIndx = strtok(receivedChars, ",");
+    if(strtokIndx == NULL) { newData = false; return; }
+    int v0 = atoi(strtokIndx);
+
+    strtokIndx = strtok(NULL, ",");
+    if(strtokIndx == NULL) { newData = false; return; }
+    int v1 = atoi(strtokIndx);
+
+    strtokIndx = strtok(NULL, ",");
+    if(strtokIndx == NULL) { newData = false; return; }
+    int v2 = atoi(strtokIndx);
+
+    strtokIndx = strtok(NULL, ",");
+    if(strtokIndx == NULL) { newData = false; return; }
+    int v3 = atoi(strtokIndx);
+
+    strtokIndx = strtok(NULL, ",");
+    if(strtokIndx == NULL) { newData = false; return; }
+    int v4 = atoi(strtokIndx);
+
+    strtokIndx = strtok(NULL, ",");
+    if(strtokIndx == NULL) { newData = false; return; }
+    int v5 = atoi(strtokIndx);
+
+    servos[0].write(constrain(v0, 20, 160));
+    servos[1].write(constrain(v1, 20, 160));
+    servos[2].write(constrain(v2, 20, 160));
+    servos[3].write(constrain(v3, 20, 160));
+    servos[4].write(constrain(v4, 20, 160));
+    servos[5].write(constrain(v5, 20, 160));
+
+    newData = false;
+  }
+}
+
+void readAndSendIMU() 
+{
+  if (millis() - lastIMURead >= IMU_INTERVAL) 
+  {
+    lastIMURead = millis();
+    
+    Wire.beginTransmission(MPU);
+    Wire.write(0x3B);  
+    Wire.endTransmission(); 
+    Wire.requestFrom(MPU, 6);  
+
+    if (Wire.available() == 6) 
+    {
+      AcX = Wire.read() << 8 | Wire.read();  
+      AcY = Wire.read() << 8 | Wire.read();  
+      AcZ = Wire.read() << 8 | Wire.read();  
+
+      float fX = (float)AcX;
+      float fY = (float)AcY;
+      float fZ = (float)AcZ;
+
+      float raw_roll = atan2(fY, fZ) * 180.0 / PI;
+      float raw_pitch = atan2(-fX, sqrt(fY * fY + fZ * fZ)) * 180.0 / PI;
+
+      float calibrated_roll = raw_roll - roll_offset;
+      float calibrated_pitch = raw_pitch - pitch_offset;
+
+      Serial.print("IMU,");
+      Serial.print(calibrated_roll);
+      Serial.print(",");
+      Serial.print(calibrated_pitch);
+      Serial.println(",0.00");
+    }
+  }
+}

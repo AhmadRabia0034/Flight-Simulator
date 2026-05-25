@@ -1,0 +1,3 @@
+--airport=OJAM
+--enable-auto-coordination
+--httpd=8080

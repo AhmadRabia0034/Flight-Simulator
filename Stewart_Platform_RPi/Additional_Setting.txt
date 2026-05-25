@@ -1,0 +1,1 @@
+--generic=socket,out,30,192.168.137.25,5001,udp,motion_out

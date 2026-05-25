@@ -1,0 +1,1 @@
+"C:\Program Files\FlightGear 2024.1\bin\fgfs.exe" 'C:\Users\20210034\AppData\Roaming\flightgear.org\FlightGear\3monitors_Edit.xmll' --launcher

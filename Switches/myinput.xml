@@ -1,0 +1,46 @@
+<?xml version="1.0"?>
+<PropertyList>
+  <generic>
+    <input>
+      <line_separator>newline</line_separator>
+      <var_separator>,</var_separator>
+
+      <chunk>
+         <name>engine_primer</name>
+         <type>double</type>
+         <node>/controls/engines/engine[0]/primer</node>
+      </chunk>
+
+      <chunk>
+         <name>magnetos</name>
+         <type>int</type>
+         <node>/controls/switches/magnetos</node>
+      </chunk>
+
+        <chunk>
+         <name>starter</name>
+         <type>bool</type>
+         <node>/controls/switches/starter</node>
+      </chunk>
+
+      <chunk>
+         <name>master_bat</name>
+         <type>bool</type>
+         <node>/controls/switches/master-bat</node>
+      </chunk>
+
+      <chunk>
+         <name>master_alt</name>
+         <type>bool</type>
+         <node>/controls/engines/engine[0]/master-alt</node>
+      </chunk>
+
+      <chunk>
+         <name>avionics_master</name>
+         <type>bool</type>
+         <node>/controls/switches/master-avionics</node>
+      </chunk>
+
+    </input>
+  </generic>
+</PropertyList>

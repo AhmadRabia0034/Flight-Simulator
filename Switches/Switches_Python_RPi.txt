@@ -1,0 +1,69 @@
+import serial
+import socket
+import time
+
+PORT = '/dev/ttyACM1' 
+BAUD_RATE = 115200
+
+UDP_IP = "192.168.137.1" 
+UDP_PORT = 5000 
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+try:
+    ser = serial.Serial(PORT, BAUD_RATE, timeout=1) 
+    time.sleep(2)
+    ser.reset_input_buffer() 
+    
+    print(f"System Active! Primer Hold Logic Loaded...")
+
+    last_pri_physical = '0'
+    current_primer_total = 0.0
+    last_sent_data = ""
+
+    while True:
+        if ser.in_waiting > 0:
+            line = ser.readline().decode('utf-8', errors='ignore').strip()
+            
+            if line:
+                parts = line.split(',')
+                
+                if len(parts) == 5 and all(p in ['0', '1'] for p in parts):
+                    
+                    alt, bat, pri, mag_pin, av = parts
+
+                    if bat == '1': 
+                        ser.write(b'L')
+                    else: 
+                        ser.write(b'D')
+                        
+                        current_primer_total = 0.0
+
+                    if pri != last_pri_physical:
+                        current_primer_total += 0.5
+                        last_pri_physical = pri
+
+                    primer_to_send = int(current_primer_total)
+
+                    if mag_pin == '1':
+                        magnetos = '3'
+                        starter = '1'
+                        
+                    else:
+                        magnetos = '3'
+                        starter = '0'
+                        
+                    udp_message = f"{primer_to_send},{magnetos},{starter},{bat},{alt},{av}\n"
+                    
+                    if udp_message != last_sent_data:
+                        
+                        for _ in range(4): 
+                            sock.sendto(udp_message.encode('utf-8'), (UDP_IP, UDP_PORT))
+                            time.sleep(0.005)
+                            
+                        print(f"Sent -> Pri:{primer_to_send} | Mag:{magnetos} | Start:{starter} | Bat:{bat} | Alt:{alt} | Av:{av}")
+                        last_sent_data = udp_message
+
+except Exception as e:
+    print(f"Error: {e}")
+finally:
+    if 'ser' in locals(): ser.close()

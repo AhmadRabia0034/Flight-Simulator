@@ -1,0 +1,198 @@
+import socket
+import serial
+import time
+import numpy as np
+import math
+from collections import deque 
+
+ROLL_GAIN = 0.65 
+PITCH_GAIN = 0.90  
+ERROR_CORRECTION_GAIN = 0.02     
+
+a = 25.0  
+s = 135.0 
+h0 = 128.0  
+
+PIVOT = np.array([0.0, -20.0, 0.0]) 
+PITCH_OFFSET = 4.1  
+ROLL_OFFSET = -1.0  
+
+direction_reversal = np.array([1, 1, -1, 1, -1, -1]) 
+beta = np.radians([0, 120, -60, -120, 60, 180])
+
+B = np.array([  
+    [30.00, 68.74, 0.0],    
+    [74.53, -8.39, 0.0],    
+    [44.53, -60.35, 0.0],   
+    [-44.53, -60.35, 0.0],  
+    [-74.53, -8.39, 0.0],   
+    [-30.00, 68.74, 0.0]    
+])
+
+P = np.array([  
+    [35.00, 51.78, 0.0],    
+    [62.34, 4.42, 0.0],     
+    [27.34, -56.20, 0.0],   
+    [-27.34, -56.20, 0.0],  
+    [-62.34, 4.42, 0.0],    
+    [-35.00, 51.78, 0.0]    
+])
+
+MIN_ANGLE = 20          
+MAX_ANGLE = 160         
+SMOOTHING_FACTOR = 0.5
+current_angles = [90.0, 90.0, 90.0, 90.0, 90.0, 90.0]
+
+WINDOW_DURATION = 10.0  
+history = deque() 
+
+total_samples = 0
+cumulative_sq_err_roll = 0.0
+cumulative_sq_err_pitch = 0.0
+
+def calculate_ik(roll, pitch, yaw, x, y, z):
+    r, p, y_ang = np.radians(roll), np.radians(pitch), np.radians(yaw)
+    T = np.array([x, y, z + h0])
+    
+    Rx = np.array([[1, 0, 0], [0, np.cos(p), -np.sin(p)], [0, np.sin(p), np.cos(p)]]) 
+    Ry = np.array([[np.cos(r), 0, np.sin(r)], [0, 1, 0], [-np.sin(r), 0, np.cos(r)]]) 
+    Rz = np.array([[np.cos(y_ang), -np.sin(y_ang), 0], [np.sin(y_ang), np.cos(y_ang), 0], [0, 0, 1]])
+    
+    R = Rz @ Ry @ Rx
+    
+    target_angles = []
+    for i in range(6):
+        P_rotated = R @ (P[i] - PIVOT) + PIVOT
+        P_new = T + P_rotated
+        q = P_new - B[i]
+        
+        L = q[0]**2 + q[1]**2 + q[2]**2 - s**2 + a**2
+        M = 2 * a * q[2]
+        N = 2 * a * (np.cos(beta[i]) * q[0] + np.sin(beta[i]) * q[1])
+        
+        denominator = np.sqrt(M**2 + N**2)
+        if denominator == 0 or abs(L / denominator) > 1:
+            return None 
+            
+        alpha = np.arcsin(L / denominator) - np.arctan2(N, M)
+        alpha_deg = np.degrees(alpha)
+        
+        corrected_angle = 90 + (direction_reversal[i] * alpha_deg)
+        target_angles.append(corrected_angle)
+            
+    return target_angles
+
+HOME_ANGLES = calculate_ik(0, 0, 0, 0, 0, 0)
+
+def create_server():
+    server_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    server_sock.bind(("0.0.0.0", 5001))
+    server_sock.settimeout(0.005) 
+    return server_sock
+
+try:
+    arduino = serial.Serial('/dev/ttyACM0', 115200, timeout=0.01)
+    time.sleep(2)
+    arduino.write("<90,90,90,90,90,90>\n".encode())
+    print("System Initialized with Adaptive Error Correction & Analytics.")
+except Exception as e:
+    print(f"Error: {e}")
+    print("Ensure the Arduino Uno is connected and the port name is correct!")
+    exit()
+
+sock = create_server()
+print("Listening for FlightGear Data on Port 5001...")
+print("-" * 80)
+
+gyro_x, gyro_y, gyro_z = 0.0, 0.0, 0.0
+active_pitch_correction = 0.0
+active_roll_correction = 0.0
+
+while True:
+    try:
+        latest_imu_line = None
+        while arduino.in_waiting > 0:
+            try:
+                ard_line = arduino.readline().decode('utf-8', errors='ignore').strip()
+                if ard_line.startswith("IMU,"):
+                    latest_imu_line = ard_line
+                    parts = ard_line.split(',')
+                    if len(parts) >= 4:
+                        gyro_x = float(parts[1]) 
+                        gyro_y = float(parts[2]) 
+                        gyro_z = float(parts[3]) 
+            except:
+                pass
+
+        try:
+            data, addr = sock.recvfrom(1024)
+            line = data.decode('utf-8').strip().split(',')
+            
+            if len(line) >= 2: 
+                t1 = time.time() 
+                
+                raw_roll = float(line[0])
+                raw_pitch = float(line[1])
+                fg_yaw = 0.0 
+                
+                active_pitch_correction = - (gyro_y * ERROR_CORRECTION_GAIN)
+                active_roll_correction  = - (gyro_x * ERROR_CORRECTION_GAIN)
+                
+                fg_roll = ((raw_roll - ROLL_OFFSET) * ROLL_GAIN) + active_roll_correction
+                fg_pitch = ((raw_pitch - PITCH_OFFSET) * PITCH_GAIN) + active_pitch_correction
+                
+                target_servo_angles = calculate_ik(roll=fg_roll, pitch=fg_pitch, yaw=fg_yaw, x=0, y=0, z=0)
+                
+                if target_servo_angles:
+                    safe_angles_to_send = []
+                    for i in range(6):
+                        adjusted_angle = 90 + (target_servo_angles[i] - HOME_ANGLES[i])
+                        clamped = max(MIN_ANGLE, min(MAX_ANGLE, adjusted_angle))
+                        current_angles[i] += SMOOTHING_FACTOR * (clamped - current_angles[i])
+                        
+                        final_angle = int(current_angles[i])
+                        safe_angles_to_send.append(final_angle)
+                    
+                    msg = f"<{safe_angles_to_send[0]},{safe_angles_to_send[1]},{safe_angles_to_send[2]},{safe_angles_to_send[3]},{safe_angles_to_send[4]},{safe_angles_to_send[5]}>\n"
+                    arduino.write(msg.encode())
+                    
+                    if latest_imu_line:
+                        t2 = time.time() 
+                        latency_ms = (t2 - t1) * 1000.0
+
+                        history.append((t2, fg_roll, gyro_x, fg_pitch, gyro_y))
+                        while history and (t2 - history[0][0]) > WINDOW_DURATION:
+                            history.popleft()
+
+                        N = len(history)
+                        if N > 0:
+                            sum_sq_err_roll = sum((item[2] - item[1])**2 for item in history)
+                            sum_sq_err_pitch = sum((item[4] - item[3])**2 for item in history)
+                            
+                            rmse_roll = math.sqrt(sum_sq_err_roll / N)
+                            rmse_pitch = math.sqrt(sum_sq_err_pitch / N)
+                            overall_rmse = (rmse_roll + rmse_pitch) / 2.0
+                        else:
+                            overall_rmse = 0.0
+
+                        cumulative_sq_err_roll += (gyro_x - fg_roll)**2
+                        cumulative_sq_err_pitch += (gyro_y - fg_pitch)**2
+                        total_samples += 1
+                        
+                        avg_rmse_roll = math.sqrt(cumulative_sq_err_roll / total_samples)
+                        avg_rmse_pitch = math.sqrt(cumulative_sq_err_pitch / total_samples)
+                        avg_overall_rmse = (avg_rmse_roll + avg_rmse_pitch) / 2.0
+
+                        print(f"Lat: {latency_ms:04.1f}ms | RMSE(10s): {overall_rmse:05.2f}deg | Avg: {avg_overall_rmse:05.2f}deg | "
+                              f"Tgt(R:{fg_roll:+05.1f} P:{fg_pitch:+05.1f}) -> "
+                              f"Act(R:{gyro_x:+05.1f} P:{gyro_y:+05.1f})", end="\r")
+
+        except socket.timeout:
+            pass 
+
+    except KeyboardInterrupt:
+        print("\nSystem Safely Shut Down.")
+        arduino.close()
+        break
+    except Exception as e:
+        pass

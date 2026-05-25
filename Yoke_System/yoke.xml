@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<PropertyList>
+  <generic>
+    <input>
+
+      <line_separator>newline</line_separator>
+      <var_separator>,</var_separator>
+      <chunk>
+	<node>/controls/flight/aileron</node>
+	<type>float</type>
+      </chunk>
+
+      <chunk>
+	<node>/controls/flight/elevator</node>
+	<type>float</type>
+      </chunk>
+
+      <chunk>
+	<node>/controls/engines/engine/throttle</node>
+	<type>float</type>
+      </chunk>
+
+      <chunk>
+	<node>/controls/engines/current-engine/mixture</node>
+	<type>float</type>
+      </chunk>
+
+      <chunk>
+	<node>/controls/gear/brake-left</node>
+	<type>float</type>
+      </chunk>
+
+      <chunk>
+	<node>/controls/gear/brake-parking</node>
+	<type>float</type>
+      </chunk>
+
+      <chunk>
+	<node>/controls/flight/elevator-trim</node>
+	<type>float</type>
+      </chunk>
+
+    </input>
+  </generic>
+</PropertyList>
