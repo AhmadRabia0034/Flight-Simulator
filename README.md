@@ -1,4 +1,4 @@
-# Distributed HIL 6-DOF Flight Simulator
+# Flight Simulator
 
 ## ✈️ Overview
 This repository contains the complete source code and configuration files for a distributed Hardware-in-the-Loop (HIL) flight simulator. The project integrates a virtual flight environment (FlightGear) with a physical 6 Degrees-of-Freedom (6-DOF) Stewart platform to provide real-time, highly synchronized motion feedback.
